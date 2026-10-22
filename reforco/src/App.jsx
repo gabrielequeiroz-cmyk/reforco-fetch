@@ -1,11 +1,11 @@
-import FormularioAvancado from './components/FormularioAvancado'
+import CrudUsuarios from './components/CrudUsuarios'
 
 function App() {
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
-      <h1>Atividade PTAC2 - Aula 05</h1>
+      <h1>Atividade PTAC2 - Aula 06</h1>
       <hr />
-      <FormularioAvancado />
+      <CrudUsuarios />
     </div>
   )
 }
