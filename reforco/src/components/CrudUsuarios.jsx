@@ -1,148 +1,128 @@
 import { useEffect, useState } from 'react'
+import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '../api'
 
 export default function CrudUsuarios() {
-  // Lista principal de usuários
   const [usuarios, setUsuarios] = useState([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
-
-  // Exercício 5 — Único objeto de estado para o formulário (Aula 05)
   const [form, setForm] = useState({ name: '', email: '' })
-  
-  // Controla se estamos no modo de edição (guarda o ID ou null)
   const [idEditando, setIdEditando] = useState(null)
   const [enviando, setEnviando] = useState(false)
 
-  // 🛠️ ALTERNE PARA TESTAR O EXERCÍCIO 4 (Interface Otimista com Rollback)
-  // Se true, vai quebrar as requisições de salvar/excluir para forçar o rollback
-  const FORCAR_ERRO_API = false
+  // 🛠️ MUDANÇAS DE TESTE (Para você mostrar os critérios de sucesso pro professor Violin)
+  // 'NORMAL' -> Executa com sucesso
+  // '404'    -> Simula recurso não encontrado (Exercício 3)
+  // '500'    -> Simula erro no servidor (Exercício 3)
+  // 'REDE'   -> Simula queda de conexão/falha de rede (Exercício 3)
+  const MODO_TESTE_ERRO = 'NORMAL' 
 
-  // Carrega os dados iniciais (GET)
+  // Exercício 3 — Função auxiliar para formatar mensagens de erro personalizadas
+  function mapearMensagemErro(erroCapturado) {
+    if (erroCapturado instanceof ApiError) {
+      if (erroCapturado.status === 404) return "Recurso não encontrado (Erro 404)"
+      if (erroCapturado.status === 500) return "Erro no servidor (Erro 500)"
+      return erroCapturado.message
+    }
+    // Tratamento para falhas de conexão ("Failed to fetch")
+    if (erroCapturado.message?.includes('Failed to fetch') || erroCapturado.name === 'TypeError') {
+      return "Falha de rede — Verifique sua conexão com a internet"
+    }
+    return erroCapturado.message
+  }
+
+  // Exercício 4 — Carrega dados iniciais com AbortController propagado pelo helper
   useEffect(() => {
     const controle = new AbortController()
+    
     async function carregar() {
       try {
         setCarregando(true)
-        const resp = await fetch('https://typicode.com', { signal: controle.signal })
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-        const data = await resp.json()
-        setUsuarios(data)
+        setErro(null)
+
+        let rota = '/users'
+        let opcoesExtras = { signal: controle.signal }
+
+        // Testes do Exercício 3 & 5
+        if (MODO_TESTE_ERRO === '404') rota = '/rota-inexistente-404'
+        if (MODO_TESTE_ERRO === '500') rota = '/invalid-posts-500' // JSONPlaceholder simula erro em algumas rotas ruins
+        if (MODO_TESTE_ERRO === 'REDE') rota = 'https://link-quebrado-que-nao-existe.com'
+        
+        // Exercício 5 — Adiciona um header customizado para teste de merge
+        opcoesExtras.headers = { 'X-Custom': 'aula07' }
+
+        const data = await apiGet(rota, opcoesExtras)
+        setUsuarios(Array.isArray(data) ? data : [])
       } catch (e) {
-        if (e.name !== 'AbortError') setErro(e.message)
+        // Exercício 4 — Filtra o AbortError para nunca virar mensagem de erro na tela
+        if (e.name !== 'AbortError') {
+          setErro(mapearMensagemErro(e))
+        }
       } finally {
         setCarregando(false)
       }
     }
+    
     carregar()
     return () => controle.abort()
-  }, [])
+  }, [MODO_TESTE_ERRO])
 
-  // Manipulador genérico do formulário (Exercício 5)
   function handleInputChange(e) {
     const { name, value } = e.target
     setForm(prev => ({ ...prev, [name]: value }))
   }
 
-  // Exercício 1 e 2 — Função de Exclusão (DELETE) com Filtro Otimista e Logs
   async function handleExcluir(id) {
-    const backupLista = usuarios // Guarda estado anterior para rollback se der erro
-    
-    // Atualização otimista: remove da tela imediatamente
+    const backupLista = usuarios
     setUsuarios(prev => prev.filter(u => u.id !== id))
     setErro(null)
 
     try {
-      const url = FORCAR_ERRO_API 
-        ? `https://typicode.com-errado/${id}`
-        : `https://typicode.com/${id}`
-
-      const resp = await fetch(url, { method: 'DELETE' })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} ao excluir`)
-
-      // Exercício 2 — Print no console explicitando o sucesso
-      console.log(`%cUsuário (ID: ${id}) excluído com sucesso da API!`, 'color: #e74c3c; font-weight: bold;')
+      await apiDelete(`/users/${id}`)
+      console.log(`%cUsuário (ID: ${id}) excluído com sucesso!`, 'color: #e74c3c; font-weight: bold;')
     } catch (e) {
-      // Exercício 4 — Rollback (restaura a lista ao valor anterior em caso de erro)
       setUsuarios(backupLista)
-      setErro(`Falha ao excluir: ${e.message}`)
+      setErro(mapearMensagemErro(e))
     }
   }
 
-  // Exercício 3 — Prepara o formulário com os dados do item selecionado
   function iniciarEdicao(usuario) {
     setIdEditando(usuario.id)
     setForm({ name: usuario.name, email: usuario.email })
   }
 
-  // Cancela a edição e limpa os campos
   function cancelarEdicao() {
     setIdEditando(null)
     setForm({ name: '', email: '' })
   }
 
-  // Salva os dados: Decide se faz POST (criar) ou PUT (editar)
   async function handleSalvar(e) {
     e.preventDefault()
     setEnviando(true)
     setErro(null)
-
-    const backupLista = usuarios // Guarda a lista atual para caso ocorra um erro
+    const backupLista = usuarios
 
     try {
       if (idEditando) {
-        // --- MODO PUT (EDITAR RECURSO) ---
-        const url = FORCAR_ERRO_API 
-          ? `https://typicode.com-errado/${idEditando}`
-          : `https://typicode.com/${idEditando}`
-
-        const resp = await fetch(url, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form)
-        })
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} ao atualizar`)
-        
-        const dadosAtualizados = await resp.json()
-
-        // Atualiza a lista mapeando e substituindo pelo retorno da API (Exercício 3)
+        const dadosAtualizados = await apiPut(`/users/${idEditando}`, form)
         setUsuarios(prev => prev.map(u => u.id === idEditando ? dadosAtualizados : u))
         setIdEditando(null)
       } else {
-        // --- MODO POST (CRIAR NOVO RECURSO) ---
-        const url = FORCAR_ERRO_API 
-          ? 'https://typicode.com-errado'
-          : 'https://typicode.com'
-
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form)
-        })
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} ao cadastrar`)
-        
-        const novoItem = await resp.json()
-        
-        // Adiciona o novo item retornado ao final da lista
+        const novoItem = await apiPost('/users', form)
         setUsuarios(prev => [...prev, novoItem])
       }
-
-      // Limpa os campos após salvar com sucesso
       setForm({ name: '', email: '' })
     } catch (e) {
-      // Exercício 4 — Rollback: Restaura a lista anterior se a API falhar ao salvar/editar
       setUsuarios(backupLista)
-      setErro(`Erro na operação: ${e.message}`)
+      setErro(mapearMensagemErro(e))
     } finally {
       setEnviando(false)
     }
   }
 
-  if (carregando) return <p>⏳ Carregando banco de dados...</p>
+  if (carregando) return <p>⏳ Carregando banco de dados usando helpers da Lista 07...</p>
 
   return (
     <div style={{ maxWidth: '600px', margin: '20px auto', fontFamily: 'sans-serif' }}>
-      
-      {/* Formulário Controlado Único (Serve tanto para Criar quanto Editar) */}
       <div style={{ padding: '15px', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '20px', backgroundColor: '#f9f9f9' }}>
         <h3>{idEditando ? '✏️ Editar Usuário' : '➕ Adicionar Novo Usuário'}</h3>
         <form onSubmit={handleSalvar}>
@@ -178,10 +158,12 @@ export default function CrudUsuarios() {
         </form>
       </div>
 
-      {/* Exercício 4 — Mensagem global de erros capturados */}
-      {erro && <p style={{ color: 'red', fontWeight: 'bold', backgroundColor: '#fdf2f2', padding: '10px', borderRadius: '4px' }}>❌ {erro}</p>}
+      {erro && (
+        <p style={{ color: 'red', fontWeight: 'bold', backgroundColor: '#fdf2f2', padding: '10px', borderRadius: '4px', border: '1px solid #f5c6cb' }}>
+          ❌ {erro}
+        </p>
+      )}
 
-      {/* Listagem de Itens (CRUD Visual) */}
       <h3>👥 Usuários Cadastrados ({usuarios.length})</h3>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {usuarios.map(u => (
@@ -191,18 +173,10 @@ export default function CrudUsuarios() {
               <small style={{ color: '#666' }}>{u.email}</small>
             </div>
             <div>
-              {/* Exercício 3 — Botão Editar */}
-              <button 
-                onClick={() => iniciarEdicao(u)} 
-                style={{ marginRight: '5px', padding: '4px 8px', cursor: 'pointer', backgroundColor: '#3498db', color: '#fff', border: 'none', borderRadius: '3px' }}
-              >
+              <button onClick={() => iniciarEdicao(u)} style={{ marginRight: '5px', padding: '4px 8px', backgroundColor: '#3498db', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>
                 Editar
               </button>
-              {/* Exercício 1 — Botão Excluir */}
-              <button 
-                onClick={() => handleExcluir(u.id)} 
-                style={{ padding: '4px 8px', cursor: 'pointer', backgroundColor: '#e74c3c', color: '#fff', border: 'none', borderRadius: '3px' }}
-              >
+              <button onClick={() => handleExcluir(u.id)} style={{ padding: '4px 8px', backgroundColor: '#e74c3c', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>
                 Excluir
               </button>
             </div>
